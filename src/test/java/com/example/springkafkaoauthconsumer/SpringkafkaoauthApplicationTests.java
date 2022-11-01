@@ -1,4 +1,4 @@
-package com.example.springkafkaoauthproducer;
+package com.example.springkafkaoauthconsumer;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

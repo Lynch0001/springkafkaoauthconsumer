@@ -1,4 +1,4 @@
-package com.example.springkafkaoauthproducer.service;
+package com.example.springkafkaoauthconsumer.service;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Secret;
@@ -8,6 +8,7 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.strimzi.kafka.oauth.client.ClientConfig;
 import io.strimzi.kafka.oauth.common.Config;
 import io.strimzi.kafka.oauth.common.ConfigProperties;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -15,33 +16,43 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
+import org.apache.kafka.common.errors.InterruptException;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 
 
 @Service
-public class ProducerService {
+public class ConsumerService {
   private static String bootstrapServers = null;
   private static String topic = null;
   private static String clientId = null;
   private static String clientSecret = null;
-  public ProducerService(){}
+  private static String consumerGroupId = null;
+  private static String trustStoreLocation = null;
+  private static String trustStoreType = null;
+  private static String trustStorePassword = null;
 
-  public void produce(){
+  public ConsumerService(){}
+
+  public void consume(){
 
     try (final KubernetesClient client = new KubernetesClientBuilder().build()){
       // topic, client_id, bootstrap
-      ConfigMap configMap = client.configMaps().inNamespace("default").withName("producer-configmap").get();
-      topic = configMap.getData().get("producer-topic");
-      clientId = configMap.getData().get("producer-client-id");
-      bootstrapServers = configMap.getData().get("producer-bootstrap-servers");
+      ConfigMap configMap = client.configMaps().inNamespace("default").withName("consumer-configmap").get();
+      topic = configMap.getData().get("consumer-topic");
+      clientId = configMap.getData().get("consumer-client-id");
+      bootstrapServers = configMap.getData().get("consumer-bootstrap-servers");
+      consumerGroupId = configMap.getData().get("consumer-group-id");
       // client_secret
-      Secret secret = client.secrets().inNamespace("default").withName("producer-secret").get();
-      String clientSecretEncoded = secret.getData().get("producer-client-secret");
+      Secret secret = client.secrets().inNamespace("default").withName("consumer-secret").get();
+      String clientSecretEncoded = secret.getData().get("consumer-client-secret");
 
       clientSecret = new String(Base64.getDecoder().decode(clientSecretEncoded));
     } catch (KubernetesClientException kce){
@@ -91,32 +102,31 @@ public class ProducerService {
     // Resolve external configurations falling back to provided defaults
     ConfigProperties.resolveAndExportToSystemProperties(defaults);
 
-    Properties props = buildProducerConfig();
-    Producer<String, String> producer = new KafkaProducer<>(props);
+
+    //
+    // common
+    //
+
+    Properties props = buildConsumerConfig();
+    Consumer<String, String> consumer = new KafkaConsumer<>(props);
 
     for (int i = 0; ; i++) {
-
       try {
-        producer.send(new ProducerRecord<>(topic, "Message " + i))
-                .get();
-        System.out.println("Produced Message " + i);
-      } catch (InterruptedException e) {
-        throw new RuntimeException("Interrupted while sending!");
-      } catch (ExecutionException e) {
-        if (e.getCause() instanceof AuthenticationException
-                || e.getCause() instanceof AuthorizationException) {
-          producer.close();
-          producer = new KafkaProducer<>(props);
-        } else {
-          throw new RuntimeException("Failed to send message: " + i, e);
-        }
-      }
+        consumer.subscribe(Arrays.asList(topic));
 
-//      try {
-//        Thread.sleep(20000);
-//      } catch (InterruptedException e) {
-//        throw new RuntimeException("Interrupted while sleeping!");
-//      }
+        while (true) {
+          ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(1));
+          for (ConsumerRecord<String, String> record : records) {
+            System.out.println("Consumed message - " + i + ": " + record.value());
+          }
+        }
+      } catch (InterruptException e) {
+        throw new RuntimeException("Interrupted while consuming message - " + i + "!");
+
+      } catch (AuthenticationException | AuthorizationException e) {
+        consumer.close();
+        consumer = new KafkaConsumer<>(props);
+      }
 
     } // end for loop
   } // end method
@@ -132,12 +142,12 @@ public class ProducerService {
   }
 
   /**
-   * Build KafkaProducer properties. The specified values are defaults that can be overridden
+   * Build KafkaConsumer properties. The specified values are defaults that can be overridden
    * through runtime system properties or env variables.
    *
    * @return Configuration properties
    */
-  private static Properties buildProducerConfig() {
+  private static Properties buildConsumerConfig() {
 
     Properties p = new Properties();
 
@@ -156,11 +166,23 @@ public class ProducerService {
 //            "OAUTH_INTROSPECT_AUTHORIZATION='Basic test-producer-client:4fvZCpeXAM6dTT14W8hGfuviNM8u5Kud';");
     p.setProperty("sasl.login.callback.handler.class", "io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler");
 
-    p.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-    p.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-    p.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+    p.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+    p.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+    p.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
 
-    p.setProperty(ProducerConfig.ACKS_CONFIG, "all");
+    p.setProperty(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
+    //p.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "10");
+    p.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+    //p.setProperty(Config.OAUTH_SCOPE, "client_credentials");
+
+    // TrustStore
+    trustStoreLocation = "";
+    p.setProperty(Config.OAUTH_SSL_TRUSTSTORE_LOCATION, trustStoreLocation);
+    trustStoreType = "";
+    p.setProperty(Config.OAUTH_SSL_TRUSTSTORE_TYPE, trustStoreType);
+    trustStorePassword = "";
+    p.setProperty(Config.OAUTH_SSL_TRUSTSTORE_PASSWORD, trustStorePassword);
+
 
     // Adjust re-authentication options
     // See: strimzi-kafka-oauth/README.md

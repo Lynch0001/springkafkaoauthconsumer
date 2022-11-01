@@ -1,17 +1,17 @@
-package com.example.springkafkaoauthproducer;
+package com.example.springkafkaoauthconsumer;
 
-import com.example.springkafkaoauthproducer.service.ProducerService;
+import com.example.springkafkaoauthconsumer.service.ConsumerService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class SpringKafkaOauthProducerApplication {
+public class SpringKafkaOauthConsumerApplication {
 
   public static void main(String[] args) {
 
-    SpringApplication.run(SpringKafkaOauthProducerApplication.class, args);
-    ProducerService producerService = new ProducerService();
-    producerService.produce();
+    SpringApplication.run(SpringKafkaOauthConsumerApplication.class, args);
+    ConsumerService consumerService = new ConsumerService();
+    consumerService.consume();
   }
 
 }

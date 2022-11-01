@@ -1,8 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: producer-configmap
+  name: consumer-configmap
 data:
-  producer-topic: topic-01
-  producer-client-id: test-producer-client
-  producer-bootstrap-servers:  localhost:9092, localhost:9093, localhost:9094
+  consumer-topic: topic-01
+  consumer-group-id: topic-01.test-group
+  consumer-client-id: test-consumer-client
+  consumer-bootstrap-servers:  localhost:9092, localhost:9093, localhost:9094
